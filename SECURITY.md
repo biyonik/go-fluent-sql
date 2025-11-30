@@ -17,7 +17,7 @@ We take the security of go-fluent-sql seriously. If you believe you have found a
 
 **Please do not report security vulnerabilities through public GitHub issues.**
 
-Instead, please report them via email to: **security@example.com** (replace with actual email)
+Instead, please report them via email to: **ahmet.altun60@gmail.com** (replace with actual email)
 
 You should receive a response within 48 hours. If for some reason you do not, please follow up via email to ensure we received your original message.
 
@@ -96,4 +96,4 @@ Subscribe to releases to stay informed about security updates.
 
 ## Contact
 
-For any security-related questions, contact: **security@example.com**
+For any security-related questions, contact: **ahmet.altun60@gmail.com**

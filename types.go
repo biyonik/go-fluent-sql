@@ -1,192 +1,66 @@
 package fluentsql
 
-//Bu dosya; SQL sorgularının parçalarını nesne mantığıyla yönetilebilir hale getirmek için tasarlanmış bir çekirdek katmandır.
-//WHERE, JOIN, ORDER, PAGINATION, CONFIGURATION gibi SQL’in en temel bloklarını tek bir merkezde toplar, böylece kod yazarken karmaşık dize manipülasyonlarına ihtiyaç kalmaz.
-//
-//Amaç;
-//✔ SQL sorgularını okunabilir kılmak
-//✔ Dinamik oluşturulabilen filtre yapısı sunmak
-//✔ ORM ve Query Builder mantığını Go ekosistemine taşımak
-//✔ Sade, genişletilebilir ve esnek bir altyapı kurmak
-//
-//Buradaki her tip, Go’nun düşük seviyeli SQL kontrol esnekliği ile Laravel/Symfony tarzı akışkan kullanım hissini aynı potada eritmek üzere düşünülmüştür.
-//
-//@author Ahmet ALTUN
-//@github github.com/biyonik
-//@linkedin linkedin.com/in/biyonik
-//@email ahmet.altun60@gmail.com
-
 import (
 	"database/sql"
 	"time"
 )
 
-// -----------------------------------------------------------------------------
-// WHERE Clause Types
-// -----------------------------------------------------------------------------
+/*
+ * ----------------------------------------------------------------------------
+ * FLUENTSQL TYPE DEFINITIONS
+ * ----------------------------------------------------------------------------
+ *
+ * Bu dosya, FluentSQL paketinin veri taşıma ve yapılandırma katmanını oluşturur.
+ * Bir veritabanı kütüphanesinin en kritik unsuru, ham SQL dünyası ile Go'nun
+ * tip güvenli dünyası (Type-Safety) arasındaki köprüyü kurmaktır.
+ *
+ * Burada yapılanlar:
+ * 1. Abstraction (Soyutlama): Ham `sql.Result` nesneleri sarmalanarak, geliştiricinin
+ * nil pointer hatalarıyla veya sürücü uyumsuzluklarıyla uğraşması engellenir.
+ * 2. Navigation (Navigasyon): Pagination yapısı ile büyük veri setleri, yönetilebilir
+ * ve gezilebilir parçalara bölünür.
+ * 3. Configuration (Yapılandırma): Veritabanı bağlantısının sadece "nereye" yapılacağı değil,
+ * "nasıl" davranacağı (pooling, timeout, charset) da burada belirlenir.
+ *
+ * Neden Bu Şekilde?
+ * Go'nun `database/sql` paketi güçlüdür ancak ham haliyle kullanıldığında çok fazla
+ * "boilerplate" (tekrarlayan kod) gerektirir. Bu tipler, bu karmaşayı bir standart
+ * altına alarak kütüphanenin geri kalanının temiz bir API sunmasını sağlar.
+ *
+ * @author Ahmet ALTUN
+ * @github github.com/biyonik
+ * @linkedin linkedin.com/in/biyonik
+ * @email ahmet.altun60@gmail.com
+ * ----------------------------------------------------------------------------
+ */
 
-// WhereType, oluşturulan WHERE şartının hangi yapıda olduğunu ifade eder.
-// Temel karşılaştırmalar, IN, BETWEEN, NULL kontrolleri ve ham RAW sorgularını
-// birbirinden ayırarak builder’ın esnek şekilde işlenebilmesini sağlar.
-// Bu enum yapısı query compiler tarafından yorumlanır ve uygun SQL formatı üretilir.
-type WhereType int
+// ----------------------------------------------------------------------------
+// Query Result Types
+// ----------------------------------------------------------------------------
 
-const (
-	// WhereTypeBasic → column op value formatındaki temel şart objesi.
-	WhereTypeBasic WhereType = iota
-	// WhereTypeIn → WHERE IN(column, ...) sorgusu için kullanılır.
-	WhereTypeIn
-	// WhereTypeNotIn → IN’in tam tersi şekilde dışlayan bir filtre oluşturur.
-	WhereTypeNotIn
-	// WhereTypeBetween → WHERE BETWEEN x AND y şeklindeki aralıklı karşılaştırmalardır.
-	WhereTypeBetween
-	// WhereTypeNotBetween → BETWEEN şartının ters çevrilmiş halidir.
-	WhereTypeNotBetween
-	// WhereTypeNull → WHERE column IS NULL koşulu.
-	WhereTypeNull
-	// WhereTypeNotNull → WHERE column IS NOT NULL koşulu.
-	WhereTypeNotNull
-	// WhereTypeRaw → ham SQL cümlesi kabul eder, güvenlik hassasiyeti gerektirir.
-	WhereTypeRaw
-	// WhereTypeNested → Parantezli ( ) gruplanmış alt şart kümeleri taşır.
-	WhereTypeNested
-	// WhereTypeDate → MySQL DATE(column) = value şeklinde tarih bazlı filtre.
-	WhereTypeDate
-	// WhereTypeYear → WHERE YEAR(column) = ? için kullanılır.
-	WhereTypeYear
-	// WhereTypeMonth → WHERE MONTH(column) = ?
-	WhereTypeMonth
-	// WhereTypeDay → WHERE DAY(column) = ?
-	WhereTypeDay
-)
-
-// String → enum değerini insan okunabilir SQL ifadelerine dönüştürür.
-func (t WhereType) String() string {
-	names := [...]string{
-		"Basic", "In", "NotIn", "Between", "NotBetween",
-		"Null", "NotNull", "Raw", "Nested",
-		"Date", "Year", "Month", "Day",
-	}
-	if int(t) < len(names) {
-		return names[t]
-	}
-	return "Unknown"
-}
-
-// -----------------------------------------------------------------------------
-// WHERE Boolean
-// -----------------------------------------------------------------------------
-
-// WhereBoolean → WHERE bloklarının AND / OR olarak zincirlenmesini kontrol eder.
-type WhereBoolean int
-
-const (
-	// WhereBooleanAnd → Varsayılan bağlayıcıdır.
-	WhereBooleanAnd WhereBoolean = iota
-	// WhereBooleanOr → Alternatif koşul kullanımına izin verir.
-	WhereBooleanOr
-)
-
-// String → SQL’de kullanılan gerçek boolean keyword'ünü döner.
-func (b WhereBoolean) String() string {
-	if b == WhereBooleanOr {
-		return "OR"
-	}
-	return "AND"
-}
-
-// -----------------------------------------------------------------------------
-// WHERE CLAUSE OBJECT
-// -----------------------------------------------------------------------------
-
-// WhereClause → tek bir WHERE koşul satırını temsil eder.
-// Kompakt ve genişletilebilir olacak şekilde tasarlanmıştır.
-// IN, BETWEEN, RAW gibi farklı yapılar Values/Nested/Raw alanlarıyla yönetilir.
-// Builder sistemi bu objeyi okuyarak otomatik SQL üretir.
-type WhereClause struct {
-	Type     WhereType
-	Boolean  WhereBoolean
-	Column   string
-	Operator string
-	Value    any
-	Values   []any         // Çoklu IN/BETWEEN operasyonlarında kullanılır
-	Nested   []WhereClause // Parantezli alt grup sorguları içerir
-	Raw      string        // Tam SQL girilmek istenen riskli durumlar için
-	Bindings []any         // RAW yazıldığında parametreleri taşır
-}
-
-// -----------------------------------------------------------------------------
-// ORDER BY Types
-// -----------------------------------------------------------------------------
-
-// OrderDirection → ASC / DESC yön bilgisini barındırır.
-type OrderDirection string
-
-const (
-	// OrderAsc → Küçükten büyüğe sıralama
-	OrderAsc OrderDirection = "ASC"
-	// OrderDesc → Büyükten küçüğe sıralama
-	OrderDesc OrderDirection = "DESC"
-)
-
-// IsValid → yön bilgisinin geçerliliğini doğrular.
-func (d OrderDirection) IsValid() bool {
-	return d == OrderAsc || d == OrderDesc
-}
-
-// OrderClause → ORDER BY sütunu ve yönünü temsil eder.
-// Raw alanı ile fonksiyonlu sıralamalara (LENGTH(name) gibi) izin verecek yapıdadır.
-type OrderClause struct {
-	Column    string
-	Direction OrderDirection
-	Raw       string // Ham sıralama cümlesi (yüksek dikkat gerektirir)
-}
-
-// -----------------------------------------------------------------------------
-// JOIN TYPES
-// -----------------------------------------------------------------------------
-
-// JoinType → JOIN’in LEFT/RIGHT/CROSS/INNER türünü belirler.
-type JoinType string
-
-const (
-	// JoinInner → INNER JOIN kullanım tipidir
-	JoinInner JoinType = "INNER"
-	// JoinLeft → Sol birleşim, soldaki kayıtları korur
-	JoinLeft JoinType = "LEFT"
-	// JoinRight → Sağ birleşim
-	JoinRight JoinType = "RIGHT"
-	// JoinCross → Kartezyen birleşim
-	JoinCross JoinType = "CROSS"
-)
-
-// JoinClause → bir JOIN satırının tüm yapısal bilgisini tutar.
-// First/Second alanları iki tabloyu birbirine bağlayan sütun eşleşmeleridir.
-type JoinClause struct {
-	Type     JoinType
-	Table    string
-	Alias    string // Tablo kısaltması
-	First    string // Sol sütun
-	Operator string // = , <>, > gibi karşılaştırma operatörleri
-	Second   string // Sağ sütun
-}
-
-// -----------------------------------------------------------------------------
-// QUERY RESULT
-// -----------------------------------------------------------------------------
-
-// QueryResult → Exec(), Insert(), Update(), Delete() sonucunu sarmalar.
-// Böylece LastInsertID() ve RowsAffected() fonksiyonları daha anlamlı çalışır.
+// QueryResult, bir INSERT, UPDATE veya DELETE işlemi sonucunda veritabanından dönen
+// ham yanıtı sarmalayan (wrapper) yapıdır.
+//
+// Bu yapı, ham `sql.Result` arabirimini doğrudan dışarı sızdırmak yerine,
+// üzerinde güvenli erişim metotları sunarak olası çalışma zamanı hatalarını (runtime errors)
+// minimize etmeyi hedefler.
 type QueryResult struct {
 	result sql.Result
 }
 
-// NewQueryResult → sql.Result'ı QueryResult yapısına dönüştürür.
+// NewQueryResult, ham `sql.Result` nesnesinden güvenli bir FluentSQL sonuç nesnesi türetir.
+//
+// Bu fabrika metodu, veritabanı sürücüsünden dönen sonucu paketleyerek
+// kütüphanenin standartlarına uygun hale getirir.
 func NewQueryResult(result sql.Result) *QueryResult {
 	return &QueryResult{result: result}
 }
 
-// LastInsertID → Veritabanının desteklemesi halinde son ID döner.
+// LastInsertID, veritabanına son eklenen kaydın benzersiz kimliğini (ID) döndürür.
+//
+// Genellikle AUTO_INCREMENT (MySQL) veya SERIAL (Postgres) alanlar için kullanılır.
+// Eğer altta yatan veritabanı sürücüsü bu özelliği desteklemiyorsa veya işlem başarısızsa
+// 0 ve hata döner. Ayrıca sonucun `nil` olup olmadığını kontrol ederek panic durumunu önler.
 func (r *QueryResult) LastInsertID() (int64, error) {
 	if r.result == nil {
 		return 0, ErrNoRows
@@ -194,7 +68,10 @@ func (r *QueryResult) LastInsertID() (int64, error) {
 	return r.result.LastInsertId()
 }
 
-// RowsAffected → Kaç satırın etkilendiğini döner.
+// RowsAffected, çalıştırılan sorgudan kaç adet satırın etkilendiğini bildirir.
+//
+// Özellikle toplu güncellemelerde (UPDATE) veya silme (DELETE) işlemlerinde,
+// operasyonun başarısını ve kapsamını doğrulamak için kritik bir metriktir.
 func (r *QueryResult) RowsAffected() (int64, error) {
 	if r.result == nil {
 		return 0, ErrNoRows
@@ -202,29 +79,38 @@ func (r *QueryResult) RowsAffected() (int64, error) {
 	return r.result.RowsAffected()
 }
 
-// -----------------------------------------------------------------------------
-// PAGINATION STRUCT
-// -----------------------------------------------------------------------------
+// ----------------------------------------------------------------------------
+// Pagination Types
+// ----------------------------------------------------------------------------
 
-// Pagination → sayfalama kontrol yapısıdır. API çıktılarında çok kullanışlıdır.
-// Toplam kayıt, sayfa adedi, önce/sonra var mı gibi bilgileri barındırır.
+// Pagination, veri listeleme işlemlerinde "sayfalama" mantığını yöneten veri yapısıdır.
+//
+// Modern web uygulamalarında ve API'lerde, binlerce kaydı tek seferde çekmek yerine
+// parçalar halinde sunmak (chunking) performansın anahtarıdır. Bu yapı, hem istemciye
+// sunulacak meta veriyi (toplam sayfa, mevcut sayfa vb.) hem de SQL sorgusu için
+// gerekli olan LIMIT/OFFSET hesaplamalarını barındırır.
 type Pagination struct {
-	Page       int   // Şu anki sayfa (1’den başlar)
-	PerPage    int   // Sayfa başına veri adedi
-	Total      int64 // Toplam kayıt
-	TotalPages int   // Toplam sayfa sayısı
-	HasMore    bool  // Sonraki sayfa var mı?
+	Page       int   // Mevcut sayfa numarası (1'den başlar)
+	PerPage    int   // Sayfa başına gösterilecek kayıt sayısı
+	Total      int64 // Veritabanındaki toplam kayıt sayısı
+	TotalPages int   // Hesaplanan toplam sayfa sayısı
+	HasMore    bool  // Sonraki sayfaların olup olmadığını belirten bayrak
 }
 
-// NewPagination → verilen total değeriyle sayfalama yapısı oluşturur.
+// NewPagination, ham sayfalama parametrelerinden zengin bir Pagination nesnesi oluşturur.
+//
+// Bu kurucu metot (constructor), geçersiz veya eksik parametreleri (örn: negatif sayfa sayısı)
+// otomatik olarak "akıllı varsayılanlara" (sensible defaults) dönüştürür.
+// Ayrıca toplam sayfa sayısını ve veri setinin devamı olup olmadığını matematiksel olarak hesaplar.
 func NewPagination(page, perPage int, total int64) *Pagination {
 	if perPage <= 0 {
-		perPage = 15
+		perPage = 15 // Varsayılan olarak sayfa başına 15 kayıt
 	}
 	if page <= 0 {
 		page = 1
 	}
 
+	// Toplam sayfa sayısının tavan değerini hesapla
 	totalPages := int(total) / perPage
 	if int(total)%perPage > 0 {
 		totalPages++
@@ -239,45 +125,58 @@ func NewPagination(page, perPage int, total int64) *Pagination {
 	}
 }
 
-// Offset → LIMIT offset değerini üretir.
+// Offset, SQL sorgusu için gerekli olan başlangıç noktasını (SKIP miktarını) hesaplar.
+//
+// Örnek: 3. sayfadasınız ve her sayfada 10 kayıt var.
+// Offset = (3 - 1) * 10 = 20. Yani ilk 20 kaydı atla, sonrakileri getir.
 func (p *Pagination) Offset() int {
 	return (p.Page - 1) * p.PerPage
 }
 
-// HasPrev → Önceki sayfa var mı?
+// HasPrev, mevcut sayfadan geriye gidilip gidilemeyeceğini kontrol eder.
+// Sayfa 1'de isek geriye gidiş yoktur.
 func (p *Pagination) HasPrev() bool {
 	return p.Page > 1
 }
 
-// HasNext → Sonraki sayfa var mı?
+// HasNext, mevcut sayfadan ileriye gidilip gidilemeyeceğini kontrol eder.
+// Eğer elimizdeki veri seti toplam sayfa sayısına ulaşmadıysa true döner.
 func (p *Pagination) HasNext() bool {
 	return p.HasMore
 }
 
-// -----------------------------------------------------------------------------
-// CONFIGURATION
-// -----------------------------------------------------------------------------
+// ----------------------------------------------------------------------------
+// Configuration Types
+// ----------------------------------------------------------------------------
 
-// Config → veritabanı bağlantı ayarlarını taşır.
-// Amacı; DSN üretmek, connection pool limitlerini belirlemek ve güvenli bağlanmaktır.
+// Config, veritabanı bağlantısının DNA'sını oluşturan yapılandırma şemasıdır.
+//
+// Bir veritabanı bağlantısı sadece host ve porttan ibaret değildir.
+// Performanslı bir uygulama için Connection Pooling (Havuzlama), Timeout süreleri,
+// Karakter setleri (Charset) ve SSL/TLS ayarları hayati önem taşır.
+// Bu struct, tüm bu parametreleri tek bir çatı altında toplar.
 type Config struct {
-	Driver       string
-	Host         string
-	Port         int
-	Database     string
-	Username     string
-	Password     string
-	Charset      string
-	Collation    string
-	Prefix       string
-	MaxOpenConns int
-	MaxIdleConns int
-	ConnMaxLife  time.Duration
-	ConnMaxIdle  time.Duration
-	TLS          bool
+	Driver       string        // Kullanılacak sürücü: "mysql", "postgres" vb.
+	Host         string        // Veritabanı sunucusunun adresi (IP veya domain)
+	Port         int           // Bağlantı portu
+	Database     string        // Bağlanılacak veritabanı (schema) adı
+	Username     string        // Yetkilendirme için kullanıcı adı
+	Password     string        // Yetkilendirme için parola
+	Charset      string        // Karakter seti (varsayılan: utf8mb4)
+	Collation    string        // Sıralama ve karşılaştırma kuralları (varsayılan: utf8mb4_unicode_ci)
+	Prefix       string        // Tablo isimlerinin önüne eklenecek önek (prefix)
+	MaxOpenConns int           // Havuzdaki maksimum açık bağlantı sayısı (0 = sınırsız)
+	MaxIdleConns int           // Havuzda boşta bekletilecek maksimum bağlantı sayısı
+	ConnMaxLife  time.Duration // Bir bağlantının yaşam döngüsü süresi
+	ConnMaxIdle  time.Duration // Bir bağlantının boşta kalabileceği maksimum süre
+	TLS          bool          // TLS/SSL şifreli bağlantı zorunluluğu
 }
 
-// DefaultConfig → MySQL tabanlı bağlantı için önerilen başlangıç değerlerini döner.
+// DefaultConfig, üretim ortamına (production) uygun varsayılan ayarlarla
+// dolu bir konfigürasyon nesnesi döndürür.
+//
+// Geliştirici hiçbir ayar yapmasa bile, bu metot sayesinde "çalışan" ve
+// belirli bir performans standardına sahip bir yapılandırma elde eder.
 func DefaultConfig() *Config {
 	return &Config{
 		Driver:       "mysql",
@@ -285,15 +184,19 @@ func DefaultConfig() *Config {
 		Port:         3306,
 		Charset:      "utf8mb4",
 		Collation:    "utf8mb4_unicode_ci",
-		MaxOpenConns: 25,
-		MaxIdleConns: 5,
-		ConnMaxLife:  5 * time.Minute,
+		MaxOpenConns: 25,              // Aşırı yüklenmeyi önlemek için makul bir sınır
+		MaxIdleConns: 5,               // Ani trafik artışları için hazırda bekleyen bağlantılar
+		ConnMaxLife:  5 * time.Minute, // Bayat bağlantıları (stale connections) temizle
 		ConnMaxIdle:  5 * time.Minute,
 	}
 }
 
-// DSN → MySQL bağlanma stringi oluşturur.
-// user:pass@tcp(host:port)/db?params formatına göre çalışır.
+// DSN (Data Source Name), veritabanı sürücüsünün anlayacağı formatta bağlantı
+// dizesini (connection string) oluşturur.
+//
+// Özellikle MySQL için gereken karmaşık parametre dizilimini (user:pass@tcp(host:port)/db?param=val)
+// dinamik olarak inşa eder. Charset, collation ve parseTime gibi kritik parametreleri
+// sorgu dizesine (query string) ekler.
 func (c *Config) DSN() string {
 	dsn := ""
 	if c.Username != "" {
@@ -310,6 +213,7 @@ func (c *Config) DSN() string {
 	}
 	dsn += ")/" + c.Database
 
+	// Bağlantı parametrelerini (Query Params) ayarla
 	params := "?"
 	if c.Charset != "" {
 		params += "charset=" + c.Charset + "&"
@@ -317,11 +221,13 @@ func (c *Config) DSN() string {
 	if c.Collation != "" {
 		params += "collation=" + c.Collation + "&"
 	}
+	// Tarih/Saat alanlarının Go'nun time.Time tipine otomatik dönüşümü için gerekli
 	params += "parseTime=true&"
 	if c.TLS {
 		params += "tls=true&"
 	}
 
+	// Son eklenen gereksiz "&" karakterini temizle
 	if len(params) > 1 {
 		dsn += params[:len(params)-1]
 	}
@@ -329,8 +235,12 @@ func (c *Config) DSN() string {
 	return dsn
 }
 
-// itoa → strconv kullanmadan int → string dönüşümü.
-// Mikro maliyetli bir fonksiyondur. Harici import’u azaltır.
+// itoa, tamsayıyı (int) stringe çeviren hafif siklet bir yardımcı fonksiyondur.
+//
+// Neden strconv.Itoa değil?
+// Kütüphanenin bağımlılıklarını minimumda tutmak ve bu basit işlem için
+// büyük bir paketi import etmemek adına, dahili (internal) bir çözüm tercih edilmiştir.
+// Recursive (özyineli) yapısıyla negatif sayıları da destekler.
 func itoa(n int) string {
 	if n == 0 {
 		return "0"
@@ -346,35 +256,25 @@ func itoa(n int) string {
 	return string(digits)
 }
 
-// -----------------------------------------------------------------------------
-// LOGGING
-// -----------------------------------------------------------------------------
+// ----------------------------------------------------------------------------
+// Logger Interface
+// ----------------------------------------------------------------------------
 
-// Logger → Sorgu çalıştıktan sonra tetiklenen standart logging arabirimidir.
-// Query, parametreler, süre ve hata bilgisi gönderilir.
+// Logger, sistemin kara kutusudur.
+//
+// Çalışan SQL sorgularını, parametreleri, sorgunun ne kadar sürdüğünü ve
+// olası hataları izlemek (observability) için kullanılan arayüzdür.
+// Geliştirici kendi logger'ını enjekte ederek sorgu performansını analiz edebilir.
 type Logger interface {
 	Log(query string, args []any, duration time.Duration, err error)
 }
 
-// NopLogger → Loglama istemeyen sistemler için boş implementasyon.
-// Üretim ortamında log kapatma seçeneği oluşturur.
+// NopLogger (No-Operation Logger), "sessiz mod" için kullanılan bir logger uygulamasıdır.
+//
+// Eğer geliştirici herhangi bir loglama mekanizması belirtmezse, sistemin
+// hata vermeden çalışmaya devam etmesi için bu boş (dummy) yapı kullanılır.
+// Tüm logları yutar ve hiçbir işlem yapmaz.
 type NopLogger struct{}
 
-// Log → hiçbir işlem yapmaz.
+// Log, NopLogger'ın implementasyonudur. Gelen tüm veriyi yok sayar.
 func (NopLogger) Log(string, []any, time.Duration, error) {}
-
-// StdLogger → Temel stdout loglayıcı.
-// Not: Üretimde gelişmiş logging altyapısı ile geliştirilmelidir.
-type StdLogger struct{}
-
-// Log → Query çalışmasının sonucunu standart çıktıya yazar.
-func (StdLogger) Log(query string, args []any, duration time.Duration, err error) {
-	status := "OK"
-	if err != nil {
-		status = "ERR: " + err.Error()
-	}
-	_ = query
-	_ = args
-	_ = duration
-	_ = status
-}

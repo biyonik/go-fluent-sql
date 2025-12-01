@@ -1,4 +1,4 @@
-package fluentsql
+package dialect
 
 import (
 	"fmt"
@@ -8,13 +8,46 @@ import (
 	"github.com/biyonik/go-fluent-sql/internal/validation"
 )
 
-// MySQLGrammar implements the Grammar interface for MySQL/MariaDB.
+/*
+ * ----------------------------------------------------------------------------
+ * MYSQL GRAMMAR IMPLEMENTATION
+ * ----------------------------------------------------------------------------
+ *
+ * Bu dosya, FluentSQL'in soyut sorgu yapısını (Query Builder) saf ve çalıştırılabilir
+ * MySQL/MariaDB SQL dizelerine dönüştüren "çevirmen" (translator) katmanıdır.
+ *
+ * SQL dünyasında standartlar olsa da (ANSI SQL), her veritabanı motoru kendi
+ * kurallarına, tırnaklama stillerine ve özel fonksiyonlarına sahiptir.
+ * Örneğin; PostgreSQL çift tırnak (") kullanırken, MySQL backtick (`) kullanır.
+ *
+ * Bu sınıfın sorumlulukları:
+ * 1. Sanitization (Temizleme): Tablo ve kolon isimlerini rezerve kelimelerle
+ * (örn: "order", "group") çakışmaması için sarmalar.
+ * 2. Compilation (Derleme): SELECT, INSERT, UPDATE, DELETE gibi operasyonları
+ * doğru sözdizimi sırasıyla (SELECT -> FROM -> WHERE -> ORDER) inşa eder.
+ * 3. Optimization (Optimizasyon): Batch Insert ve Upsert gibi MySQL'e özgü
+ * performans özelliklerini destekler.
+ *
+ * @author Ahmet ALTUN
+ * @github github.com/biyonik
+ * @linkedin linkedin.com/in/biyonik
+ * @email ahmet.altun60@gmail.com
+ * ----------------------------------------------------------------------------
+ */
+
+// MySQLGrammar, Grammar arayüzünü MySQL ve MariaDB veritabanları için implemente eder.
+//
+// Bu yapı, temel dilbilgisi kurallarını (BaseGrammar) devralır ve üzerine
+// MySQL'e özgü davranışları (parametre yer tutucuları, tırnaklama stili vb.) ekler.
 type MySQLGrammar struct {
 	BaseGrammar
 }
 
-// NewMySQLGrammar creates a new MySQL grammar instance.
-func NewMySQLGrammar() *MySQLGrammar {
+// MySQL, yeni bir MySQL dilbilgisi örneği oluşturur.
+//
+// Varsayılan tarih formatı ve sürücü isimlendirmesi burada yapılandırılır.
+// Bu metot genellikle Driver Factory tarafından çağrılır.
+func MySQL() *MySQLGrammar {
 	return &MySQLGrammar{
 		BaseGrammar: BaseGrammar{
 			name:       "mysql",
@@ -23,7 +56,21 @@ func NewMySQLGrammar() *MySQLGrammar {
 	}
 }
 
-// Wrap wraps an identifier with backticks.
+// NewMySQLGrammar, geriye dönük uyumluluk (backward compatibility) için
+// MySQL() kurucusuna (constructor) verilen bir takma addır.
+func NewMySQLGrammar() *MySQLGrammar {
+	return MySQL()
+}
+
+// Wrap, bir veritabanı tanımlayıcısını (tablo veya kolon adı) MySQL standartlarına
+// uygun kaçış karakterleriyle (backtick) sarmalar.
+//
+// Bu işlem iki kritik sorunu çözer:
+//  1. SQL Injection güvenliği sağlar.
+//  2. Rezerve edilmiş kelimelerin (örn: `key`, `index`) kolon adı olarak
+//     kullanılabilmesine olanak tanır.
+//
+// Örnek: "users.name" -> "`users`.`name`"
 func (g *MySQLGrammar) Wrap(identifier string) (string, error) {
 	if identifier == "*" {
 		return "*", nil
@@ -46,7 +93,10 @@ func (g *MySQLGrammar) Wrap(identifier string) (string, error) {
 	return "`" + identifier + "`", nil
 }
 
-// WrapTable wraps a table name, handling aliases.
+// WrapTable, tablo ismini ve varsa takma adını (alias) güvenli bir şekilde sarmalar.
+//
+// Query Builder içinde "users as u" şeklinde tanımlanan tabloları
+// MySQL'in anlayacağı "`users` AS `u`" formatına dönüştürür.
 func (g *MySQLGrammar) WrapTable(table string) (string, error) {
 	name, alias, err := validation.ValidateTableWithAlias(table)
 	if err != nil {
@@ -61,18 +111,26 @@ func (g *MySQLGrammar) WrapTable(table string) (string, error) {
 	return wrapped, nil
 }
 
-// WrapValue wraps a column value reference.
+// WrapValue, bir kolon değer referansını sarmalar.
+// MySQLGrammar içinde Wrap metodu ile aynı işlevi görür.
 func (g *MySQLGrammar) WrapValue(value string) (string, error) {
 	return g.Wrap(value)
 }
 
-// Placeholder returns the MySQL placeholder (?).
+// Placeholder, sorgu parametreleri için kullanılan yer tutucuyu döndürür.
+//
+// PostgreSQL ($1, $2) aksine, MySQL sıralı soru işareti (?) kullanır.
+// Index parametresi MySQL için önemsizdir ancak arayüz uyumluluğu için tutulur.
 func (g *MySQLGrammar) Placeholder(index int) string {
 	return "?"
 }
 
-// CompileSelect compiles a SELECT query.
-func (g *MySQLGrammar) CompileSelect(b *Builder) (string, []any, error) {
+// CompileSelect, bir SELECT sorgusunu parçalarından (components) birleştirerek inşa eder.
+//
+// Bu metot bir montaj hattı gibi çalışır; her bir SQL parçası (columns, joins, wheres)
+// sırasıyla işlenir ve string builder üzerinde birleştirilir.
+// Karmaşık mantık (örn: Raw expression kontrolü) burada yönetilir.
+func (g *MySQLGrammar) CompileSelect(b QueryBuilder) (string, []any, error) {
 	if b.GetTable() == "" {
 		return "", nil, ErrNoTable
 	}
@@ -199,8 +257,11 @@ func (g *MySQLGrammar) CompileSelect(b *Builder) (string, []any, error) {
 	return sql.String(), args, nil
 }
 
-// CompileInsert compiles an INSERT query.
-func (g *MySQLGrammar) CompileInsert(b *Builder, data map[string]any) (string, []any, error) {
+// CompileInsert, tekil bir kayıt ekleme sorgusu oluşturur.
+//
+// Map yapısındaki veriyi alır, anahtarları alfabetik sıralar (deterministik test edilebilirlik için)
+// ve "INSERT INTO table (col1, col2) VALUES (?, ?)" formatında hazırlar.
+func (g *MySQLGrammar) CompileInsert(b QueryBuilder, data map[string]any) (string, []any, error) {
 	if b.GetTable() == "" {
 		return "", nil, ErrNoTable
 	}
@@ -252,8 +313,14 @@ func (g *MySQLGrammar) CompileInsert(b *Builder, data map[string]any) (string, [
 	return sql.String(), args, nil
 }
 
-// CompileInsertBatch compiles a batch INSERT query.
-func (g *MySQLGrammar) CompileInsertBatch(b *Builder, data []map[string]any) (string, []any, error) {
+// CompileInsertBatch, tek bir sorguda çoklu kayıt (bulk insert) ekleme işlemi oluşturur.
+//
+// Veritabanı ile yapılan "round-trip" sayısını azalttığı için performans açısından
+// kritik bir metottur. 1000 kayıt için 1000 ayrı sorgu atmak yerine,
+// tek bir sorguda hepsini gönderir.
+//
+// Dikkat: Tüm satırların aynı anahtarlara (kolonlara) sahip olduğu varsayılır.
+func (g *MySQLGrammar) CompileInsertBatch(b QueryBuilder, data []map[string]any) (string, []any, error) {
 	if b.GetTable() == "" {
 		return "", nil, ErrNoTable
 	}
@@ -321,8 +388,11 @@ func (g *MySQLGrammar) CompileInsertBatch(b *Builder, data []map[string]any) (st
 	return sql.String(), args, nil
 }
 
-// CompileUpdate compiles an UPDATE query.
-func (g *MySQLGrammar) CompileUpdate(b *Builder, data map[string]any) (string, []any, error) {
+// CompileUpdate, mevcut kayıtları güncellemek için UPDATE sorgusu oluşturur.
+//
+// SET bloğunu oluştururken, parametrik yapı (prepared statements) kullanılarak
+// SQL Injection riski elimine edilir.
+func (g *MySQLGrammar) CompileUpdate(b QueryBuilder, data map[string]any) (string, []any, error) {
 	if b.GetTable() == "" {
 		return "", nil, ErrNoTable
 	}
@@ -376,8 +446,11 @@ func (g *MySQLGrammar) CompileUpdate(b *Builder, data map[string]any) (string, [
 	return sql.String(), args, nil
 }
 
-// CompileDelete compiles a DELETE query.
-func (g *MySQLGrammar) CompileDelete(b *Builder) (string, []any, error) {
+// CompileDelete, kayıt silme sorgusu (DELETE) oluşturur.
+//
+// WHERE koşulları eklenerek, tüm tablonun yanlışlıkla silinmesi (truncate etkisi)
+// engellenir (tabii geliştirici WHERE eklemeyi unutmazsa).
+func (g *MySQLGrammar) CompileDelete(b QueryBuilder) (string, []any, error) {
 	if b.GetTable() == "" {
 		return "", nil, ErrNoTable
 	}
@@ -408,13 +481,15 @@ func (g *MySQLGrammar) CompileDelete(b *Builder) (string, []any, error) {
 	return sql.String(), args, nil
 }
 
-// CompileExists compiles an EXISTS query.
-func (g *MySQLGrammar) CompileExists(b *Builder) (string, []any, error) {
+// CompileExists, bir kaydın varlığını kontrol etmek için optimize edilmiş bir sorgu oluşturur.
+//
+// "SELECT * FROM" yerine "SELECT 1 ... LIMIT 1" yapısını kullanarak veritabanı
+// motorunun tüm veriyi okumasını engeller ve performansı artırır.
+func (g *MySQLGrammar) CompileExists(b QueryBuilder) (string, []any, error) {
 	if b.GetTable() == "" {
 		return "", nil, ErrNoTable
 	}
 
-	// Build a SELECT 1 query with same conditions
 	var sql strings.Builder
 	args := make([]any, 0)
 
@@ -443,8 +518,11 @@ func (g *MySQLGrammar) CompileExists(b *Builder) (string, []any, error) {
 	return sql.String(), args, nil
 }
 
-// CompileCount compiles a COUNT query.
-func (g *MySQLGrammar) CompileCount(b *Builder, column string) (string, []any, error) {
+// CompileCount, satır sayısını öğrenmek için COUNT sorgusu oluşturur.
+//
+// Eğer belirli bir kolon verilirse NULL olmayan satırları sayar,
+// verilmezse COUNT(*) kullanarak tüm satırları sayar.
+func (g *MySQLGrammar) CompileCount(b QueryBuilder, column string) (string, []any, error) {
 	if b.GetTable() == "" {
 		return "", nil, ErrNoTable
 	}
@@ -487,8 +565,8 @@ func (g *MySQLGrammar) CompileCount(b *Builder, column string) (string, []any, e
 	return sql.String(), args, nil
 }
 
-// CompileAggregate compiles an aggregate function query.
-func (g *MySQLGrammar) CompileAggregate(b *Builder, fn, column string) (string, []any, error) {
+// CompileAggregate, SUM, AVG, MIN, MAX gibi toplama fonksiyonlarını işler.
+func (g *MySQLGrammar) CompileAggregate(b QueryBuilder, fn, column string) (string, []any, error) {
 	if b.GetTable() == "" {
 		return "", nil, ErrNoTable
 	}
@@ -531,8 +609,11 @@ func (g *MySQLGrammar) CompileAggregate(b *Builder, fn, column string) (string, 
 	return sql.String(), args, nil
 }
 
-// CompileTruncate compiles a TRUNCATE TABLE statement.
-func (g *MySQLGrammar) CompileTruncate(b *Builder) (string, error) {
+// CompileTruncate, bir tabloyu tamamen boşaltmak için TRUNCATE komutunu oluşturur.
+//
+// DELETE FROM'dan farklı olarak, TRUNCATE DDL (Data Definition Language) komutudur
+// ve genellikle geri alınamaz (transaction-safe değildir). Auto-increment sayacını sıfırlar.
+func (g *MySQLGrammar) CompileTruncate(b QueryBuilder) (string, error) {
 	if b.GetTable() == "" {
 		return "", ErrNoTable
 	}
@@ -545,8 +626,11 @@ func (g *MySQLGrammar) CompileTruncate(b *Builder) (string, error) {
 	return "TRUNCATE TABLE " + table, nil
 }
 
-// CompileUpsert compiles an INSERT ... ON DUPLICATE KEY UPDATE query.
-func (g *MySQLGrammar) CompileUpsert(b *Builder, data map[string]any, updateColumns []string) (string, []any, error) {
+// CompileUpsert, MySQL'in "ON DUPLICATE KEY UPDATE" özelliğini kullanarak
+// "varsa güncelle, yoksa ekle" (update or insert) mantığını uygular.
+//
+// Modern uygulama geliştirmede idempotent işlemler için kritik bir fonksiyondur.
+func (g *MySQLGrammar) CompileUpsert(b QueryBuilder, data map[string]any, updateColumns []string) (string, []any, error) {
 	// First compile the INSERT part
 	insertSQL, args, err := g.CompileInsert(b, data)
 	if err != nil {
@@ -581,7 +665,12 @@ func (g *MySQLGrammar) CompileUpsert(b *Builder, data map[string]any, updateColu
 	return sql.String(), args, nil
 }
 
-// compileWheres compiles WHERE clauses.
+// ----------------------------------------------------------------------------
+// Internal helpers
+// ----------------------------------------------------------------------------
+
+// compileWheres, çoklu WHERE koşullarını (AND/OR mantığıyla) birleştirir.
+// Recursive (özyineli) yapısı sayesinde iç içe parantez gruplarını yönetebilir.
 func (g *MySQLGrammar) compileWheres(wheres []WhereClause) (string, []any, error) {
 	if len(wheres) == 0 {
 		return "", nil, nil
@@ -609,7 +698,8 @@ func (g *MySQLGrammar) compileWheres(wheres []WhereClause) (string, []any, error
 	return sql.String(), args, nil
 }
 
-// compileWhere compiles a single WHERE clause.
+// compileWhere, tekil bir WHERE koşul tipini uygun SQL parçasına dönüştürür.
+// Strateji deseni (Strategy Pattern) benzeri bir yapı ile farklı where tiplerini yönetir.
 func (g *MySQLGrammar) compileWhere(where WhereClause) (string, []any, error) {
 	switch where.Type {
 	case WhereTypeBasic:
@@ -643,6 +733,7 @@ func (g *MySQLGrammar) compileWhere(where WhereClause) (string, []any, error) {
 	}
 }
 
+// compileWhereBasic, standart "col = val" veya "col > val" karşılaştırmalarını derler.
 func (g *MySQLGrammar) compileWhereBasic(where WhereClause) (string, []any, error) {
 	column, err := g.Wrap(where.Column)
 	if err != nil {
@@ -656,6 +747,7 @@ func (g *MySQLGrammar) compileWhereBasic(where WhereClause) (string, []any, erro
 	return column + " " + strings.ToUpper(where.Operator) + " ?", []any{where.Value}, nil
 }
 
+// compileWhereIn, "col IN (1, 2, 3)" yapısını oluşturur.
 func (g *MySQLGrammar) compileWhereIn(where WhereClause, not bool) (string, []any, error) {
 	if len(where.Values) == 0 {
 		return "", nil, ErrEmptyWhereIn
@@ -679,9 +771,10 @@ func (g *MySQLGrammar) compileWhereIn(where WhereClause, not bool) (string, []an
 	return column + " " + op + " (" + strings.Join(placeholders, ", ") + ")", where.Values, nil
 }
 
+// compileWhereBetween, "col BETWEEN x AND y" yapısını oluşturur.
 func (g *MySQLGrammar) compileWhereBetween(where WhereClause, not bool) (string, []any, error) {
 	if len(where.Values) != 2 {
-		return "", nil, ErrInvalidBetweenValues
+		return "", nil, ErrInvalidBetween
 	}
 
 	column, err := g.Wrap(where.Column)
@@ -697,6 +790,7 @@ func (g *MySQLGrammar) compileWhereBetween(where WhereClause, not bool) (string,
 	return column + " " + op + " ? AND ?", where.Values, nil
 }
 
+// compileWhereNull, "col IS NULL" kontrolünü oluşturur.
 func (g *MySQLGrammar) compileWhereNull(where WhereClause, not bool) (string, []any, error) {
 	column, err := g.Wrap(where.Column)
 	if err != nil {
@@ -711,6 +805,8 @@ func (g *MySQLGrammar) compileWhereNull(where WhereClause, not bool) (string, []
 	return column + " " + op, nil, nil
 }
 
+// compileWhereNested, iç içe geçmiş parantezli sorguları "(...)" içine alır.
+// Örn: WHERE a=1 AND (b=2 OR c=3)
 func (g *MySQLGrammar) compileWhereNested(where WhereClause) (string, []any, error) {
 	if len(where.Nested) == 0 {
 		return "", nil, nil
@@ -724,6 +820,7 @@ func (g *MySQLGrammar) compileWhereNested(where WhereClause) (string, []any, err
 	return "(" + nestedSQL + ")", args, nil
 }
 
+// compileWhereDate, tarih bazlı özel sorguları derler.
 func (g *MySQLGrammar) compileWhereDate(where WhereClause, fn string) (string, []any, error) {
 	column, err := g.Wrap(where.Column)
 	if err != nil {
@@ -733,6 +830,7 @@ func (g *MySQLGrammar) compileWhereDate(where WhereClause, fn string) (string, [
 	return fn + "(" + column + ") = ?", []any{where.Value}, nil
 }
 
+// compileJoin, tablolar arası ilişki kuran JOIN ifadelerini derler.
 func (g *MySQLGrammar) compileJoin(join JoinClause) (string, error) {
 	table, err := g.WrapTable(join.Table)
 	if err != nil {

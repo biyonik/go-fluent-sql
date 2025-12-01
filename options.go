@@ -1,5 +1,7 @@
 package fluentsql
 
+import "github.com/biyonik/go-fluent-sql/dialect"
+
 // -----------------------------------------------------------------------------
 //  Bu dosya; FluentSQL yapısının çekirdek konfigürasyon katmanını oluşturan,
 //  esnek ve genişletilebilir *Option* mimarisini içerir. Amaç, veritabanı
@@ -47,7 +49,7 @@ type Option func(*DB)
 // Örnek:
 //
 //	db := fluentsql.NewDB(sqlDB, fluentsql.WithGrammar(fluentsql.NewPostgreSQLGrammar()))
-func WithGrammar(g Grammar) Option {
+func WithGrammar(g dialect.Grammar) Option {
 	return func(d *DB) {
 		d.grammar = g
 	}

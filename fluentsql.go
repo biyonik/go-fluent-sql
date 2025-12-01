@@ -10,6 +10,8 @@ package fluentsql
 
 import (
 	"database/sql"
+
+	"github.com/biyonik/go-fluent-sql/dialect"
 )
 
 // Version, go-fluent-sql kütüphanesinin mevcut sürümünü belirtir.
@@ -95,7 +97,7 @@ func ConnectWithConfig(cfg *Config, opts ...Option) (*DB, error) {
 func New(opts ...Option) *Builder {
 	// Sadece seçenekleri çıkarmak için geçici DB oluştur
 	d := &DB{
-		grammar: NewMySQLGrammar(),
+		grammar: dialect.NewMySQLGrammar(),
 		scanner: NewDefaultScanner(),
 		logger:  NopLogger{},
 	}

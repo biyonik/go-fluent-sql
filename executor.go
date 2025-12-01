@@ -3,6 +3,8 @@ package fluentsql
 import (
 	"context"
 	"database/sql"
+
+	"github.com/biyonik/go-fluent-sql/dialect"
 )
 
 /*
@@ -70,12 +72,12 @@ var (
 // Bu yapı; "Salt bağlantı" → "Akıllı ORM çekirdeği" dönüşümünün temel taşıdır.
 // ---------------------------------------------------------------------
 type DB struct {
-	*sql.DB         // Standart Go DB nesnesi gömülü olarak bulunur.
-	grammar Grammar // SQL cümle yapısını oluşturur (MySQL / PostgreSQL / SQLite vb.)
-	scanner Scanner // DB satırlarını struct'lara tarayıp dönüştüren bileşen.
-	logger  Logger  // İsteğe bağlı kayıtlama sistemi, debug durumunda detay sağlar.
-	debug   bool    // Sorgular loglansın mı? Geliştirici modu açık mı?
-	prefix  string  // Tablo adlarının önüne otomatik eklenebilen global prefix.
+	*sql.DB                 // Standart Go DB nesnesi gömülü olarak bulunur.
+	grammar dialect.Grammar // SQL cümle yapısını oluşturur (MySQL / PostgreSQL / SQLite vb.)
+	scanner Scanner         // DB satırlarını struct'lara tarayıp dönüştüren bileşen.
+	logger  Logger          // İsteğe bağlı kayıtlama sistemi, debug durumunda detay sağlar.
+	debug   bool            // Sorgular loglansın mı? Geliştirici modu açık mı?
+	prefix  string          // Tablo adlarının önüne otomatik eklenebilen global prefix.
 }
 
 // NewDB -> DB sarmalayıcısının oluşturulduğu yerdir.
@@ -99,7 +101,7 @@ func NewDB(db *sql.DB, opts ...Option) *DB {
 
 	// Defaults — Eğer kullanıcı grammar/scanner belirtmediyse MySQL grammar ve default scanner atanır.
 	if d.grammar == nil {
-		d.grammar = NewMySQLGrammar()
+		d.grammar = dialect.NewMySQLGrammar()
 	}
 	if d.scanner == nil {
 		d.scanner = NewDefaultScanner()
@@ -109,7 +111,7 @@ func NewDB(db *sql.DB, opts ...Option) *DB {
 }
 
 // Grammar -> Aktif SQL cümle oluşturma motorunu döndürür.
-func (d *DB) Grammar() Grammar {
+func (d *DB) Grammar() dialect.Grammar {
 	return d.grammar
 }
 

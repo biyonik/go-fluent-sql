@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"sync"
+
+	"github.com/biyonik/go-fluent-sql/dialect"
 )
 
 // -----------------------------------------------------------------------------
@@ -39,7 +41,7 @@ import (
 // nesnesini kullanmalıdır.
 type Transaction struct {
 	tx      *sql.Tx
-	grammar Grammar
+	grammar dialect.Grammar
 	scanner Scanner
 	logger  Logger
 	debug   bool
@@ -157,7 +159,7 @@ func (t *Transaction) QueryRowContext(ctx context.Context, query string, args ..
 }
 
 // Grammar — transaction seviyesinde kullanılan SQL sözdizimini döndürür.
-func (t *Transaction) Grammar() Grammar {
+func (t *Transaction) Grammar() dialect.Grammar {
 	return t.grammar
 }
 

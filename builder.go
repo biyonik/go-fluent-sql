@@ -3,6 +3,8 @@ package fluentsql
 import (
 	"context"
 	"database/sql"
+
+	"github.com/biyonik/go-fluent-sql/dialect"
 )
 
 // Builder, SQL sorgularını akıcı bir arayüz (fluent interface) ile oluşturmak için kullanılan ana sınıftır.
@@ -29,7 +31,7 @@ import (
 // @email ahmet.altun60@gmail.com
 type Builder struct {
 	executor QueryExecutor
-	grammar  Grammar
+	grammar  dialect.Grammar
 	scanner  Scanner
 
 	// Table name and alias
@@ -41,11 +43,11 @@ type Builder struct {
 	distinct bool
 
 	// Query clauses
-	wheres  []WhereClause
-	orders  []OrderClause
-	joins   []JoinClause
+	wheres  []dialect.WhereClause
+	orders  []dialect.OrderClause
+	joins   []dialect.JoinClause
 	groupBy []string
-	having  []WhereClause
+	having  []dialect.WhereClause
 
 	// Limits
 	limit  *int
@@ -56,17 +58,17 @@ type Builder struct {
 }
 
 // NewBuilder, belirtilen executor, grammar ve scanner ile yeni bir Builder oluşturur.
-func NewBuilder(executor QueryExecutor, grammar Grammar, scanner Scanner) *Builder {
+func NewBuilder(executor QueryExecutor, grammar dialect.Grammar, scanner Scanner) *Builder {
 	return &Builder{
 		executor: executor,
 		grammar:  grammar,
 		scanner:  scanner,
 		columns:  make([]string, 0),
-		wheres:   make([]WhereClause, 0),
-		orders:   make([]OrderClause, 0),
-		joins:    make([]JoinClause, 0),
+		wheres:   make([]dialect.WhereClause, 0),
+		orders:   make([]dialect.OrderClause, 0),
+		joins:    make([]dialect.JoinClause, 0),
 		groupBy:  make([]string, 0),
-		having:   make([]WhereClause, 0),
+		having:   make([]dialect.WhereClause, 0),
 	}
 }
 
@@ -109,9 +111,9 @@ func (b *Builder) Distinct() *Builder {
 
 // Where, temel bir WHERE koşulu ekler.
 func (b *Builder) Where(column, operator string, value any) *Builder {
-	b.wheres = append(b.wheres, WhereClause{
-		Type:     WhereTypeBasic,
-		Boolean:  WhereBooleanAnd,
+	b.wheres = append(b.wheres, dialect.WhereClause{
+		Type:     dialect.WhereTypeBasic,
+		Boolean:  dialect.WhereBooleanAnd,
 		Column:   column,
 		Operator: operator,
 		Value:    value,
@@ -121,9 +123,9 @@ func (b *Builder) Where(column, operator string, value any) *Builder {
 
 // OrWhere, OR WHERE koşulu ekler.
 func (b *Builder) OrWhere(column, operator string, value any) *Builder {
-	b.wheres = append(b.wheres, WhereClause{
-		Type:     WhereTypeBasic,
-		Boolean:  WhereBooleanOr,
+	b.wheres = append(b.wheres, dialect.WhereClause{
+		Type:     dialect.WhereTypeBasic,
+		Boolean:  dialect.WhereBooleanOr,
 		Column:   column,
 		Operator: operator,
 		Value:    value,
@@ -133,9 +135,9 @@ func (b *Builder) OrWhere(column, operator string, value any) *Builder {
 
 // WhereIn, WHERE IN koşulu ekler.
 func (b *Builder) WhereIn(column string, values []any) *Builder {
-	b.wheres = append(b.wheres, WhereClause{
-		Type:    WhereTypeIn,
-		Boolean: WhereBooleanAnd,
+	b.wheres = append(b.wheres, dialect.WhereClause{
+		Type:    dialect.WhereTypeIn,
+		Boolean: dialect.WhereBooleanAnd,
 		Column:  column,
 		Values:  values,
 	})
@@ -144,9 +146,9 @@ func (b *Builder) WhereIn(column string, values []any) *Builder {
 
 // WhereNotIn, WHERE NOT IN koşulu ekler.
 func (b *Builder) WhereNotIn(column string, values []any) *Builder {
-	b.wheres = append(b.wheres, WhereClause{
-		Type:    WhereTypeNotIn,
-		Boolean: WhereBooleanAnd,
+	b.wheres = append(b.wheres, dialect.WhereClause{
+		Type:    dialect.WhereTypeNotIn,
+		Boolean: dialect.WhereBooleanAnd,
 		Column:  column,
 		Values:  values,
 	})
@@ -155,9 +157,9 @@ func (b *Builder) WhereNotIn(column string, values []any) *Builder {
 
 // OrWhereIn, OR WHERE IN koşulu ekler.
 func (b *Builder) OrWhereIn(column string, values []any) *Builder {
-	b.wheres = append(b.wheres, WhereClause{
-		Type:    WhereTypeIn,
-		Boolean: WhereBooleanOr,
+	b.wheres = append(b.wheres, dialect.WhereClause{
+		Type:    dialect.WhereTypeIn,
+		Boolean: dialect.WhereBooleanOr,
 		Column:  column,
 		Values:  values,
 	})
@@ -166,9 +168,9 @@ func (b *Builder) OrWhereIn(column string, values []any) *Builder {
 
 // OrWhereNotIn, OR WHERE NOT IN koşulu ekler.
 func (b *Builder) OrWhereNotIn(column string, values []any) *Builder {
-	b.wheres = append(b.wheres, WhereClause{
-		Type:    WhereTypeNotIn,
-		Boolean: WhereBooleanOr,
+	b.wheres = append(b.wheres, dialect.WhereClause{
+		Type:    dialect.WhereTypeNotIn,
+		Boolean: dialect.WhereBooleanOr,
 		Column:  column,
 		Values:  values,
 	})
@@ -177,9 +179,9 @@ func (b *Builder) OrWhereNotIn(column string, values []any) *Builder {
 
 // WhereBetween, WHERE BETWEEN koşulu ekler.
 func (b *Builder) WhereBetween(column string, min, max any) *Builder {
-	b.wheres = append(b.wheres, WhereClause{
-		Type:    WhereTypeBetween,
-		Boolean: WhereBooleanAnd,
+	b.wheres = append(b.wheres, dialect.WhereClause{
+		Type:    dialect.WhereTypeBetween,
+		Boolean: dialect.WhereBooleanAnd,
 		Column:  column,
 		Values:  []any{min, max},
 	})
@@ -188,9 +190,9 @@ func (b *Builder) WhereBetween(column string, min, max any) *Builder {
 
 // WhereNotBetween, WHERE NOT BETWEEN koşulu ekler.
 func (b *Builder) WhereNotBetween(column string, min, max any) *Builder {
-	b.wheres = append(b.wheres, WhereClause{
-		Type:    WhereTypeNotBetween,
-		Boolean: WhereBooleanAnd,
+	b.wheres = append(b.wheres, dialect.WhereClause{
+		Type:    dialect.WhereTypeNotBetween,
+		Boolean: dialect.WhereBooleanAnd,
 		Column:  column,
 		Values:  []any{min, max},
 	})
@@ -199,9 +201,9 @@ func (b *Builder) WhereNotBetween(column string, min, max any) *Builder {
 
 // WhereNull, WHERE IS NULL koşulu ekler.
 func (b *Builder) WhereNull(column string) *Builder {
-	b.wheres = append(b.wheres, WhereClause{
-		Type:    WhereTypeNull,
-		Boolean: WhereBooleanAnd,
+	b.wheres = append(b.wheres, dialect.WhereClause{
+		Type:    dialect.WhereTypeNull,
+		Boolean: dialect.WhereBooleanAnd,
 		Column:  column,
 	})
 	return b
@@ -209,9 +211,9 @@ func (b *Builder) WhereNull(column string) *Builder {
 
 // WhereNotNull, WHERE IS NOT NULL koşulu ekler.
 func (b *Builder) WhereNotNull(column string) *Builder {
-	b.wheres = append(b.wheres, WhereClause{
-		Type:    WhereTypeNotNull,
-		Boolean: WhereBooleanAnd,
+	b.wheres = append(b.wheres, dialect.WhereClause{
+		Type:    dialect.WhereTypeNotNull,
+		Boolean: dialect.WhereBooleanAnd,
 		Column:  column,
 	})
 	return b
@@ -219,9 +221,9 @@ func (b *Builder) WhereNotNull(column string) *Builder {
 
 // OrWhereNull, OR WHERE IS NULL koşulu ekler.
 func (b *Builder) OrWhereNull(column string) *Builder {
-	b.wheres = append(b.wheres, WhereClause{
-		Type:    WhereTypeNull,
-		Boolean: WhereBooleanOr,
+	b.wheres = append(b.wheres, dialect.WhereClause{
+		Type:    dialect.WhereTypeNull,
+		Boolean: dialect.WhereBooleanOr,
 		Column:  column,
 	})
 	return b
@@ -229,9 +231,9 @@ func (b *Builder) OrWhereNull(column string) *Builder {
 
 // OrWhereNotNull, OR WHERE IS NOT NULL koşulu ekler.
 func (b *Builder) OrWhereNotNull(column string) *Builder {
-	b.wheres = append(b.wheres, WhereClause{
-		Type:    WhereTypeNotNull,
-		Boolean: WhereBooleanOr,
+	b.wheres = append(b.wheres, dialect.WhereClause{
+		Type:    dialect.WhereTypeNotNull,
+		Boolean: dialect.WhereBooleanOr,
 		Column:  column,
 	})
 	return b
@@ -239,9 +241,9 @@ func (b *Builder) OrWhereNotNull(column string) *Builder {
 
 // WhereLike, WHERE LIKE koşulu ekler.
 func (b *Builder) WhereLike(column string, pattern string) *Builder {
-	b.wheres = append(b.wheres, WhereClause{
-		Type:     WhereTypeBasic,
-		Boolean:  WhereBooleanAnd,
+	b.wheres = append(b.wheres, dialect.WhereClause{
+		Type:     dialect.WhereTypeBasic,
+		Boolean:  dialect.WhereBooleanAnd,
 		Column:   column,
 		Operator: "LIKE",
 		Value:    pattern,
@@ -251,9 +253,9 @@ func (b *Builder) WhereLike(column string, pattern string) *Builder {
 
 // WhereNotLike, WHERE NOT LIKE koşulu ekler.
 func (b *Builder) WhereNotLike(column string, pattern string) *Builder {
-	b.wheres = append(b.wheres, WhereClause{
-		Type:     WhereTypeBasic,
-		Boolean:  WhereBooleanAnd,
+	b.wheres = append(b.wheres, dialect.WhereClause{
+		Type:     dialect.WhereTypeBasic,
+		Boolean:  dialect.WhereBooleanAnd,
 		Column:   column,
 		Operator: "NOT LIKE",
 		Value:    pattern,
@@ -263,9 +265,9 @@ func (b *Builder) WhereNotLike(column string, pattern string) *Builder {
 
 // WhereRaw, ham SQL WHERE ifadesi ekler.
 func (b *Builder) WhereRaw(sqlExpr string, bindings ...any) *Builder {
-	b.wheres = append(b.wheres, WhereClause{
-		Type:     WhereTypeRaw,
-		Boolean:  WhereBooleanAnd,
+	b.wheres = append(b.wheres, dialect.WhereClause{
+		Type:     dialect.WhereTypeRaw,
+		Boolean:  dialect.WhereBooleanAnd,
 		Raw:      sqlExpr,
 		Bindings: bindings,
 	})
@@ -274,9 +276,9 @@ func (b *Builder) WhereRaw(sqlExpr string, bindings ...any) *Builder {
 
 // OrWhereRaw, ham SQL OR WHERE ifadesi ekler.
 func (b *Builder) OrWhereRaw(sqlExpr string, bindings ...any) *Builder {
-	b.wheres = append(b.wheres, WhereClause{
-		Type:     WhereTypeRaw,
-		Boolean:  WhereBooleanOr,
+	b.wheres = append(b.wheres, dialect.WhereClause{
+		Type:     dialect.WhereTypeRaw,
+		Boolean:  dialect.WhereBooleanOr,
 		Raw:      sqlExpr,
 		Bindings: bindings,
 	})
@@ -287,9 +289,9 @@ func (b *Builder) OrWhereRaw(sqlExpr string, bindings ...any) *Builder {
 func (b *Builder) WhereNested(fn func(*Builder)) *Builder {
 	nested := NewBuilder(b.executor, b.grammar, b.scanner)
 	fn(nested)
-	b.wheres = append(b.wheres, WhereClause{
-		Type:    WhereTypeNested,
-		Boolean: WhereBooleanAnd,
+	b.wheres = append(b.wheres, dialect.WhereClause{
+		Type:    dialect.WhereTypeNested,
+		Boolean: dialect.WhereBooleanAnd,
 		Nested:  nested.wheres,
 	})
 	return b
@@ -299,9 +301,9 @@ func (b *Builder) WhereNested(fn func(*Builder)) *Builder {
 func (b *Builder) OrWhereNested(fn func(*Builder)) *Builder {
 	nested := NewBuilder(b.executor, b.grammar, b.scanner)
 	fn(nested)
-	b.wheres = append(b.wheres, WhereClause{
-		Type:    WhereTypeNested,
-		Boolean: WhereBooleanOr,
+	b.wheres = append(b.wheres, dialect.WhereClause{
+		Type:    dialect.WhereTypeNested,
+		Boolean: dialect.WhereBooleanOr,
 		Nested:  nested.wheres,
 	})
 	return b
@@ -309,9 +311,9 @@ func (b *Builder) OrWhereNested(fn func(*Builder)) *Builder {
 
 // WhereDate, DATE(column) = value koşulu ekler.
 func (b *Builder) WhereDate(column string, value string) *Builder {
-	b.wheres = append(b.wheres, WhereClause{
-		Type:    WhereTypeDate,
-		Boolean: WhereBooleanAnd,
+	b.wheres = append(b.wheres, dialect.WhereClause{
+		Type:    dialect.WhereTypeDate,
+		Boolean: dialect.WhereBooleanAnd,
 		Column:  column,
 		Value:   value,
 	})
@@ -320,9 +322,9 @@ func (b *Builder) WhereDate(column string, value string) *Builder {
 
 // WhereYear, YEAR(column) = value koşulu ekler.
 func (b *Builder) WhereYear(column string, value int) *Builder {
-	b.wheres = append(b.wheres, WhereClause{
-		Type:    WhereTypeYear,
-		Boolean: WhereBooleanAnd,
+	b.wheres = append(b.wheres, dialect.WhereClause{
+		Type:    dialect.WhereTypeYear,
+		Boolean: dialect.WhereBooleanAnd,
 		Column:  column,
 		Value:   value,
 	})
@@ -331,9 +333,9 @@ func (b *Builder) WhereYear(column string, value int) *Builder {
 
 // WhereMonth, MONTH(column) = value koşulu ekler.
 func (b *Builder) WhereMonth(column string, value int) *Builder {
-	b.wheres = append(b.wheres, WhereClause{
-		Type:    WhereTypeMonth,
-		Boolean: WhereBooleanAnd,
+	b.wheres = append(b.wheres, dialect.WhereClause{
+		Type:    dialect.WhereTypeMonth,
+		Boolean: dialect.WhereBooleanAnd,
 		Column:  column,
 		Value:   value,
 	})
@@ -342,9 +344,9 @@ func (b *Builder) WhereMonth(column string, value int) *Builder {
 
 // WhereDay, DAY(column) = value koşulu ekler.
 func (b *Builder) WhereDay(column string, value int) *Builder {
-	b.wheres = append(b.wheres, WhereClause{
-		Type:    WhereTypeDay,
-		Boolean: WhereBooleanAnd,
+	b.wheres = append(b.wheres, dialect.WhereClause{
+		Type:    dialect.WhereTypeDay,
+		Boolean: dialect.WhereBooleanAnd,
 		Column:  column,
 		Value:   value,
 	})
@@ -353,8 +355,8 @@ func (b *Builder) WhereDay(column string, value int) *Builder {
 
 // Join, INNER JOIN ekler.
 func (b *Builder) Join(table, first, operator, second string) *Builder {
-	b.joins = append(b.joins, JoinClause{
-		Type:     JoinInner,
+	b.joins = append(b.joins, dialect.JoinClause{
+		Type:     dialect.JoinInner,
 		Table:    table,
 		First:    first,
 		Operator: operator,
@@ -365,8 +367,8 @@ func (b *Builder) Join(table, first, operator, second string) *Builder {
 
 // LeftJoin, LEFT JOIN ekler.
 func (b *Builder) LeftJoin(table, first, operator, second string) *Builder {
-	b.joins = append(b.joins, JoinClause{
-		Type:     JoinLeft,
+	b.joins = append(b.joins, dialect.JoinClause{
+		Type:     dialect.JoinLeft,
 		Table:    table,
 		First:    first,
 		Operator: operator,
@@ -377,8 +379,8 @@ func (b *Builder) LeftJoin(table, first, operator, second string) *Builder {
 
 // RightJoin, RIGHT JOIN ekler.
 func (b *Builder) RightJoin(table, first, operator, second string) *Builder {
-	b.joins = append(b.joins, JoinClause{
-		Type:     JoinRight,
+	b.joins = append(b.joins, dialect.JoinClause{
+		Type:     dialect.JoinRight,
 		Table:    table,
 		First:    first,
 		Operator: operator,
@@ -389,16 +391,16 @@ func (b *Builder) RightJoin(table, first, operator, second string) *Builder {
 
 // CrossJoin, CROSS JOIN ekler.
 func (b *Builder) CrossJoin(table string) *Builder {
-	b.joins = append(b.joins, JoinClause{
-		Type:  JoinCross,
+	b.joins = append(b.joins, dialect.JoinClause{
+		Type:  dialect.JoinCross,
 		Table: table,
 	})
 	return b
 }
 
 // OrderBy, ORDER BY ekler.
-func (b *Builder) OrderBy(column string, direction OrderDirection) *Builder {
-	b.orders = append(b.orders, OrderClause{
+func (b *Builder) OrderBy(column string, direction dialect.OrderDirection) *Builder {
+	b.orders = append(b.orders, dialect.OrderClause{
 		Column:    column,
 		Direction: direction,
 	})
@@ -407,17 +409,17 @@ func (b *Builder) OrderBy(column string, direction OrderDirection) *Builder {
 
 // OrderByAsc, artan sırada ORDER BY ekler.
 func (b *Builder) OrderByAsc(column string) *Builder {
-	return b.OrderBy(column, OrderAsc)
+	return b.OrderBy(column, dialect.OrderAsc)
 }
 
 // OrderByDesc, azalan sırada ORDER BY ekler.
 func (b *Builder) OrderByDesc(column string) *Builder {
-	return b.OrderBy(column, OrderDesc)
+	return b.OrderBy(column, dialect.OrderDesc)
 }
 
 // OrderByRaw, ham ORDER BY ifadesi ekler.
 func (b *Builder) OrderByRaw(expr string) *Builder {
-	b.orders = append(b.orders, OrderClause{
+	b.orders = append(b.orders, dialect.OrderClause{
 		Raw: expr,
 	})
 	return b
@@ -441,9 +443,9 @@ func (b *Builder) GroupBy(columns ...string) *Builder {
 
 // Having, HAVING ekler.
 func (b *Builder) Having(column, operator string, value any) *Builder {
-	b.having = append(b.having, WhereClause{
-		Type:     WhereTypeBasic,
-		Boolean:  WhereBooleanAnd,
+	b.having = append(b.having, dialect.WhereClause{
+		Type:     dialect.WhereTypeBasic,
+		Boolean:  dialect.WhereBooleanAnd,
 		Column:   column,
 		Operator: operator,
 		Value:    value,
@@ -453,9 +455,9 @@ func (b *Builder) Having(column, operator string, value any) *Builder {
 
 // HavingRaw, ham HAVING ifadesi ekler.
 func (b *Builder) HavingRaw(sqlExpr string, bindings ...any) *Builder {
-	b.having = append(b.having, WhereClause{
-		Type:     WhereTypeRaw,
-		Boolean:  WhereBooleanAnd,
+	b.having = append(b.having, dialect.WhereClause{
+		Type:     dialect.WhereTypeRaw,
+		Boolean:  dialect.WhereBooleanAnd,
 		Raw:      sqlExpr,
 		Bindings: bindings,
 	})
@@ -559,19 +561,19 @@ func (b *Builder) Clone() *Builder {
 	clone.columns = make([]string, len(b.columns))
 	copy(clone.columns, b.columns)
 
-	clone.wheres = make([]WhereClause, len(b.wheres))
+	clone.wheres = make([]dialect.WhereClause, len(b.wheres))
 	copy(clone.wheres, b.wheres)
 
-	clone.orders = make([]OrderClause, len(b.orders))
+	clone.orders = make([]dialect.OrderClause, len(b.orders))
 	copy(clone.orders, b.orders)
 
-	clone.joins = make([]JoinClause, len(b.joins))
+	clone.joins = make([]dialect.JoinClause, len(b.joins))
 	copy(clone.joins, b.joins)
 
 	clone.groupBy = make([]string, len(b.groupBy))
 	copy(clone.groupBy, b.groupBy)
 
-	clone.having = make([]WhereClause, len(b.having))
+	clone.having = make([]dialect.WhereClause, len(b.having))
 	copy(clone.having, b.having)
 
 	return clone
@@ -583,11 +585,11 @@ func (b *Builder) Reset() *Builder {
 	b.tableAlias = ""
 	b.columns = make([]string, 0)
 	b.distinct = false
-	b.wheres = make([]WhereClause, 0)
-	b.orders = make([]OrderClause, 0)
-	b.joins = make([]JoinClause, 0)
+	b.wheres = make([]dialect.WhereClause, 0)
+	b.orders = make([]dialect.OrderClause, 0)
+	b.joins = make([]dialect.JoinClause, 0)
 	b.groupBy = make([]string, 0)
-	b.having = make([]WhereClause, 0)
+	b.having = make([]dialect.WhereClause, 0)
 	b.limit = nil
 	b.offset = nil
 	b.err = nil
@@ -633,17 +635,17 @@ func (b *Builder) IsDistinct() bool {
 }
 
 // GetWheres, WHERE koşullarını döndürür.
-func (b *Builder) GetWheres() []WhereClause {
+func (b *Builder) GetWheres() []dialect.WhereClause {
 	return b.wheres
 }
 
 // GetOrders, ORDER BY koşullarını döndürür.
-func (b *Builder) GetOrders() []OrderClause {
+func (b *Builder) GetOrders() []dialect.OrderClause {
 	return b.orders
 }
 
 // GetJoins, JOIN koşullarını döndürür.
-func (b *Builder) GetJoins() []JoinClause {
+func (b *Builder) GetJoins() []dialect.JoinClause {
 	return b.joins
 }
 
@@ -653,7 +655,7 @@ func (b *Builder) GetGroupBy() []string {
 }
 
 // GetHaving, HAVING koşullarını döndürür.
-func (b *Builder) GetHaving() []WhereClause {
+func (b *Builder) GetHaving() []dialect.WhereClause {
 	return b.having
 }
 
